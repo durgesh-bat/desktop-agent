@@ -59,31 +59,68 @@ Examples:
 
 
 def get_actions(user_input):
+    """
+    Call LLM to get next action(s).
+    
+    Args:
+        user_input: Task description and context
+        
+    Returns:
+        Dict with 'actions' key containing list of actions
+    """
+    
+    logger.debug("Calling NVIDIA Qwen LLM for action planning...")
+    
+    try:
+        response = client.chat.completions.create(
+            model="qwen/qwen3-coder-480b-a35b-instruct",
+            messages=[
+                {
+                    "role":"system",
+                    "content":SYSTEM_PROMPT
+                },
+                {
+                    "role":"user",
+                    "content":user_input
+                }
+            ],
+            temperature=0.2,
+            top_p=0.8,
+            max_tokens=1024,
+            timeout=30
+        )
 
-    response = client.chat.completions.create(
-        model="qwen/qwen3-coder-480b-a35b-instruct",
-        messages=[
-            {
-                "role":"system",
-                "content":SYSTEM_PROMPT
-            },
-            {
-                "role":"user",
-                "content":user_input
-            }
-        ],
-        temperature=0.2,
-        top_p=0.8,
-        max_tokens=1024
-    )
+        text = response.choices[0].message.content.strip()
+        logger.debug(f"LLM raw response: {text[:100]}...")
 
-    text = response.choices[0].message.content.strip()
+        # Clean up response
+        text = (
+            text
+            .replace("```json", "")
+            .replace("```", "")
+            .strip()
+        )
 
-    text = (
-        text
-        .replace("```json", "")
-        .replace("```", "")
-        .strip()
-    )
-
-    return json.loads(text)
+        logger.debug(f"Cleaned response: {text[:100]}...")
+        
+        # Parse JSON
+        result = json.loads(text)
+        
+        logger.info(f"LLM returned {len(result.get('actions', []))} action(s)")
+        
+        if result.get("actions"):
+            first_action = result["actions"][0]
+            logger.info(f"First action: {first_action.get('action', 'unknown')}")
+        
+        return result
+    
+    except json.JSONDecodeError as e:
+        logger.error(f"LLM returned invalid JSON: {e}")
+        logger.error(f"Response was: {text}")
+        # Return safe fallback
+        return {"actions": [{"action": "wait", "seconds": 2}]}
+    
+    except Exception as e:
+        logger.error(f"LLM API error: {e}", exc_info=True)
+        # Return safe fallback
+        return {"actions": [{"action": "wait", "seconds": 2}]}
